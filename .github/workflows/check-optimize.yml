@@ -1,0 +1,92 @@
+name: Validate and Optimize PNG Files
+
+on:
+  pull_request:
+    paths:
+      - 'magica/**'
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  check-extensions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate file extensions
+        id: check_files
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/base
+          CHANGED_FILES=$(git diff --diff-filter=AM --name-only origin/base...${{ github.sha }} | grep '^magica/' || true)
+          INVALID_FILES=$(echo "$CHANGED_FILES" | grep -v '\.png$' || true)
+
+          if [[ -n "$INVALID_FILES" ]]; then
+            echo "Invalid file extensions found."
+            {
+              echo 'INVALID_FILES<<EOF'
+              echo "$INVALID_FILES"
+              echo EOF
+            } >> "$GITHUB_ENV"
+            exit 1
+          fi
+
+      - name: Post comment on PR for invalid files
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const invalidFiles = process.env.INVALID_FILES;
+            if (invalidFiles) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## :warning: The following files have invalid extensions:\n\`\`\`r\n${invalidFiles}\n\`\`\``
+              });
+            }
+
+  optimize-png:
+    runs-on: ubuntu-latest
+    needs: check-extensions
+    if: success()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+
+      - name: Install required tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zopfli
+
+      - name: Get Changed PNG Files
+        id: changed_files
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/base
+          CHANGED_FILES=$(git diff --diff-filter=AM --name-only origin/base...${{ github.sha }} | grep '\.png$' || true)
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+
+      - name: Optimize PNG files
+        if: steps.changed_files.outputs.files != ''
+        run: |
+          parallel -j0 zopflipng -y --iterations=64 --filters=01234mepb --lossy_8bit --lossy_transparent "{}" "{}" ::: $(echo "${{ steps.changed_files.outputs.files }}" | tr '\n' ' ')
+
+      - name: Commit changes and push
+        if: steps.changed_files.outputs.files != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "Sudachi"
+          git config user.email "sudachi@cirno.name"
+          git add '*.png'
+          git commit -m "Optimize PNG files"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
