@@ -27,6 +27,7 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/base
           CHANGED_FILES=$(git diff --diff-filter=AM --name-only origin/base...HEAD | grep '^magica/' || true)
+          echo "CHANGED_FILES = $CHANGED_FILES $(git status)"
 
           INVALID_FILES=$(echo "$CHANGED_FILES" | grep -v '\.png$' || true)
 
@@ -79,6 +80,7 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/base
           CHANGED_FILES=$(git diff --diff-filter=AM --name-only origin/base...HEAD | grep '\.png$' | tr '\n' ' ' || true)
+          echo "CHANGED_FILES = $CHANGED_FILES $(git status)"
 
           echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
 
